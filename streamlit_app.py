@@ -794,6 +794,43 @@ st.markdown(f"""
         box-shadow: 0 0 15px var(--panel-border) !important;
     }}
     
+    /* Segmented Control Styling to match tabs */
+    div[data-testid="stSegmentedControl"] {{
+        background-color: var(--panel-bg) !important;
+        padding: 8px !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--panel-border) !important;
+        display: inline-flex !important;
+        gap: 10px !important;
+        margin-bottom: 15px !important;
+    }}
+    
+    div[data-testid="stSegmentedControl"] button {{
+        font-family: 'Outfit', sans-serif !important;
+        font-weight: 600 !important;
+        color: var(--text-muted) !important;
+        background-color: transparent !important;
+        border: none !important;
+        padding: 10px 20px !important;
+        border-radius: 8px !important;
+        transition: all 0.3s !important;
+        width: auto !important;
+        box-shadow: none !important;
+        text-transform: none !important;
+    }}
+    
+    div[data-testid="stSegmentedControl"] button:hover {{
+        color: var(--primary-accent) !important;
+        background-color: rgba(6, 182, 212, 0.1) !important;
+    }}
+    
+    div[data-testid="stSegmentedControl"] button[aria-checked="true"] {{
+        color: var(--text-primary) !important;
+        background: var(--btn-gradient) !important;
+        border: 1px solid var(--panel-border) !important;
+        box-shadow: 0 0 15px var(--panel-border) !important;
+    }}
+    
     /* Custom Scrollbar */
     ::-webkit-scrollbar {{
         width: 8px;
@@ -2563,10 +2600,17 @@ if st.session_state.raw_df is not None and not st.session_state.raw_df.empty:
     # ----------------------------------------------------
     # DASHBOARD TABS
     # ----------------------------------------------------
-    tab1, tab2 = st.tabs(["📊 DATA MATRIX", "💬 SMART OUTREACH"])
+    # Use st.segmented_control to select the active tab and persist across widget interactions
+    active_tab = st.segmented_control(
+        "Navigation",
+        options=["📊 DATA MATRIX", "💬 SMART OUTREACH"],
+        default="📊 DATA MATRIX",
+        key="active_tab",
+        label_visibility="collapsed"
+    )
 
     # Tab 1: Leads Data Grid with Export
-    with tab1:
+    if active_tab == "📊 DATA MATRIX":
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Row 1: Download buttons
@@ -2607,7 +2651,7 @@ if st.session_state.raw_df is not None and not st.session_state.raw_df.empty:
             st.markdown("</div>", unsafe_allow_html=True)
 
     # Tab 2: Personalized Outreach Template Builder
-    with tab2:
+    elif active_tab == "💬 SMART OUTREACH":
         # Load outreach history from Drive on first load
         load_outreach_history_from_drive()
 
@@ -2842,49 +2886,39 @@ if st.session_state.raw_df is not None and not st.session_state.raw_df.empty:
             st.markdown(f"**Subject:** `{subject}`")
             st.text_area("Generated Outreach Message:", value=message, height=250)
             
-            # Action Buttons — Log outreach then open link
+            # Build URLs for WhatsApp and Gmail
+            if lead_phone != "N/A":
+                encoded_msg = urllib.parse.quote(message)
+                clean_phone = re.sub(r'\D', '', lead_phone)
+                if len(clean_phone) == 10:
+                    clean_phone = "91" + clean_phone
+                elif len(clean_phone) > 10 and clean_phone.startswith("0"):
+                    clean_phone = "91" + clean_phone[1:]
+                wa_url = f"https://api.whatsapp.com/send/?phone={clean_phone}&text={encoded_msg}"
+            else:
+                wa_url = None
+            
+            encoded_subject = urllib.parse.quote(subject)
+            encoded_body = urllib.parse.quote(message)
+            gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={encoded_subject}&body={encoded_body}"
+            
+            # Action buttons
             action_col1, action_col2 = st.columns(2)
             
             with action_col1:
-                # WhatsApp — Log + Send
-                if lead_phone != "N/A":
-                    encoded_msg = urllib.parse.quote(message)
-                    clean_phone = re.sub(r'\D', '', lead_phone)
-                    if len(clean_phone) == 10:
-                        clean_phone = "91" + clean_phone
-                    elif len(clean_phone) > 10 and clean_phone.startswith("0"):
-                        clean_phone = "91" + clean_phone[1:]
-                    wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
-                    
-                    if st.button("📲 LOG & SEND WHATSAPP", key="btn_wa_log", use_container_width=True):
+                if wa_url:
+                    if st.button("📲 SEND VIA WHATSAPP", key="btn_wa_log", use_container_width=True):
                         record_outreach(selected_lead, lead_category, lead_address, lead_phone, "WhatsApp", campaign_type, current_city, current_state)
-                        st.session_state.outreach_log_pending = "whatsapp"
-                        st.rerun()
-                    
-                    # Show the actual link after logging
-                    if st.session_state.get("outreach_log_pending") == "whatsapp":
-                        st.success("✅ Outreach logged! Click below to open WhatsApp:")
-                        st.link_button("💬 OPEN WHATSAPP NOW", wa_url, use_container_width=True)
-                        st.session_state.outreach_log_pending = None
+                        import webbrowser
+                        webbrowser.open_new_tab(wa_url)
                 else:
-                    st.button("💬 WhatsApp N/A", disabled=True, use_container_width=True)
+                    st.button("💬 WHATSAPP N/A", disabled=True, use_container_width=True)
             
             with action_col2:
-                # Email — Log + Send
-                encoded_subject = urllib.parse.quote(subject)
-                encoded_body = urllib.parse.quote(message)
-                mailto_url = f"mailto:?subject={encoded_subject}&body={encoded_body}"
-                
-                if st.button("📨 LOG & COMPOSE EMAIL", key="btn_email_log", use_container_width=True):
+                if st.button("📧 SEND VIA GMAIL", key="btn_email_log", use_container_width=True):
                     record_outreach(selected_lead, lead_category, lead_address, lead_phone, "Email", campaign_type, current_city, current_state)
-                    st.session_state.outreach_log_pending = "email"
-                    st.rerun()
-                
-                # Show the actual link after logging
-                if st.session_state.get("outreach_log_pending") == "email":
-                    st.success("✅ Outreach logged! Click below to compose email:")
-                    st.link_button("📧 OPEN EMAIL NOW", mailto_url, use_container_width=True)
-                    st.session_state.outreach_log_pending = None
+                    import webbrowser
+                    webbrowser.open_new_tab(gmail_url)
  
         # ==========================================
         # [START] LEAD OUTREACH TIMELINE WIDGET
