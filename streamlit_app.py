@@ -1761,8 +1761,23 @@ def fetch_from_google_places(city, state, selected_categories, max_leads):
         
         page_token = ""
         while True:
-            if page_token: payload["pageToken"] = page_token
-            response = requests.post(url, headers=headers, json=payload)
+            # Retry logic for transient SSL/network errors
+            response = None
+            for attempt in range(3):
+                try:
+                    if page_token: payload["pageToken"] = page_token
+                    response = requests.post(url, headers=headers, json=payload, timeout=30)
+                    break  # Success — exit retry loop
+                except (requests.exceptions.SSLError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as net_err:
+                    if attempt < 2:
+                        wait_sec = 2 ** (attempt + 1)  # 2s, 4s
+                        time.sleep(wait_sec)
+                    else:
+                        st.error(f"🔴 Network error after 3 retries: {net_err}")
+                        response = None
+            
+            if response is None:
+                break
             if response.status_code != 200: 
                 st.error(f"🔴 Google API Error Code: {response.status_code}\nDetails: {response.text}")
                 break 
@@ -2902,23 +2917,101 @@ if st.session_state.raw_df is not None and not st.session_state.raw_df.empty:
             encoded_body = urllib.parse.quote(message)
             gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={encoded_subject}&body={encoded_body}"
             
-            # Action buttons
-            action_col1, action_col2 = st.columns(2)
+            # Secret trigger buttons (hidden via CSS)
+            st.html("""
+            <style>
+                .st-key-btn_wa_trigger_hidden, .st-key-btn_email_trigger_hidden {
+                    display: none !important;
+                }
+            </style>
+            """)
             
-            with action_col1:
-                if wa_url:
-                    if st.button("📲 SEND VIA WHATSAPP", key="btn_wa_log", use_container_width=True):
-                        record_outreach(selected_lead, lead_category, lead_address, lead_phone, "WhatsApp", campaign_type, current_city, current_state)
-                        import webbrowser
-                        webbrowser.open_new_tab(wa_url)
-                else:
-                    st.button("💬 WHATSAPP N/A", disabled=True, use_container_width=True)
-            
-            with action_col2:
-                if st.button("📧 SEND VIA GMAIL", key="btn_email_log", use_container_width=True):
-                    record_outreach(selected_lead, lead_category, lead_address, lead_phone, "Email", campaign_type, current_city, current_state)
-                    import webbrowser
-                    webbrowser.open_new_tab(gmail_url)
+            if st.button("WA Trigger", key="btn_wa_trigger_hidden"):
+                record_outreach(selected_lead, lead_category, lead_address, lead_phone, "WhatsApp", campaign_type, current_city, current_state)
+                st.toast(f"🚀 WhatsApp outreach to {selected_lead} recorded!", icon="✅")
+                st.rerun()
+
+            if st.button("Email Trigger", key="btn_email_trigger_hidden"):
+                record_outreach(selected_lead, lead_category, lead_address, lead_phone, "Email", campaign_type, current_city, current_state)
+                st.toast(f"🚀 Email outreach to {selected_lead} recorded!", icon="✅")
+                st.rerun()
+
+            # Dynamic CSS styles for the HTML buttons to match current theme
+            theme_val = THEMES[st.session_state.app_theme]
+            btn_gradient = theme_val['btn_gradient']
+            primary_accent = theme_val['primary_accent']
+            btn_hover_shadow = theme_val['btn_hover_shadow']
+
+            # Render styled direct HTML buttons that trigger both a new window/tab and click the hidden Streamlit triggers
+            html_buttons = f"""
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@700&display=swap');
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    background: transparent;
+                    overflow: hidden;
+                }}
+                .button-container {{
+                    display: flex;
+                    gap: 15px;
+                    width: 100%;
+                    box-sizing: border-box;
+                }}
+                .btn {{
+                    flex: 1;
+                    background: {btn_gradient};
+                    color: #ffffff;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 14px;
+                    letter-spacing: 1.5px;
+                    border-radius: 10px;
+                    border: 1px solid rgba(255,255,255,0.12);
+                    padding: 12px 10px;
+                    box-shadow: 0 4px 20px {btn_hover_shadow};
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    text-transform: uppercase;
+                    cursor: pointer;
+                    text-align: center;
+                    text-decoration: none;
+                    display: inline-block;
+                    box-sizing: border-box;
+                }}
+                .btn:hover {{
+                    box-shadow: 0 6px 30px {primary_accent};
+                    transform: translateY(-2px);
+                    border: 1px solid rgba(255,255,255,0.3);
+                }}
+                .btn:active {{
+                    transform: translateY(1px);
+                }}
+                .btn.disabled {{
+                    opacity: 0.4;
+                    pointer-events: none;
+                    cursor: not-allowed;
+                }}
+            </style>
+            <div class="button-container">
+                <a id="wa_btn" class="btn {'disabled' if not wa_url else ''}" href="{wa_url or '#'}" target="_blank" onclick="triggerWA()">📲 SEND VIA WHATSAPP</a>
+                <a id="email_btn" class="btn" href="{gmail_url}" target="_blank" onclick="triggerEmail()">📧 SEND VIA GMAIL</a>
+            </div>
+            <script>
+                function triggerWA() {{
+                    const trigger = window.parent.document.querySelector('.st-key-btn_wa_trigger_hidden button');
+                    if (trigger) {{
+                        setTimeout(() => {{ trigger.click(); }}, 100);
+                    }}
+                }}
+                function triggerEmail() {{
+                    const trigger = window.parent.document.querySelector('.st-key-btn_email_trigger_hidden button');
+                    if (trigger) {{
+                        setTimeout(() => {{ trigger.click(); }}, 100);
+                    }}
+                }}
+            </script>
+            """
+            st.components.v1.html(html_buttons, height=52)
  
         # ==========================================
         # [START] LEAD OUTREACH TIMELINE WIDGET
